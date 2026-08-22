@@ -48,13 +48,28 @@ export function searchSymbols(q) {
   return request(`/api/portfolios/search?q=${encodeURIComponent(q || '')}`)
 }
 
-export function computeFrontier(payload) {
+export async function computeFrontier(payload) {
   const symbols = (payload.symbols || []).map((symbol) => {
     const normalized = String(symbol).trim().toUpperCase()
     return /^\d{4,6}$/.test(normalized) ? `${normalized}.TW` : normalized
   })
-  return request('/api/portfolios/frontier', {
+  const result = await request('/api/portfolios/frontier', {
     method: 'POST',
     body: JSON.stringify({ ...payload, symbols }),
   })
+  const shortNames = Object.fromEntries(await Promise.all(symbols.map(async (symbol) => {
+    try {
+      const quote = await request(`/api/stocks/${encodeURIComponent(symbol)}/quote`)
+      return [symbol, quote.data?.shortName || quote.data?.name || symbol]
+    } catch {
+      return [symbol, symbol]
+    }
+  })))
+  if (result.data?.assets) {
+    result.data.assets = result.data.assets.map((asset) => ({
+      ...asset,
+      name: shortNames[asset.symbol] || asset.name,
+    }))
+  }
+  return result
 }
