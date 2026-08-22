@@ -411,10 +411,11 @@ onMounted(() => {
 }
 .hero h2 {
   margin: 0 0 10px;
-  max-width: 52rem;
-  font-size: clamp(1.7rem, 4.5vw, 3.25rem);
-  line-height: 1.13;
-  letter-spacing: -0.035em;
+  max-width: none;
+  font-size: clamp(1.5rem, 2.8vw, 2.15rem);
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+  white-space: nowrap;
 }
 .hero h2 span { color: #fde68a; }
 .hero-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
@@ -594,7 +595,7 @@ th { color: #94a3b8; font-size: 0.78rem; }
 @media (max-width: 767px) {
   .workbench { gap: 14px; }
   .hero { grid-template-columns: 1fr; padding-top: 6px; }
-  .hero h2 { font-size: clamp(1.8rem, 9vw, 2.6rem); }
+  .hero h2 { font-size: clamp(1.55rem, 7vw, 2rem); white-space: normal; }
   .hero-badges { justify-content: flex-start; }
   .panel, .overview { padding: 14px; border-radius: 16px; }
   .opts { flex-direction: column; align-items: stretch; }
