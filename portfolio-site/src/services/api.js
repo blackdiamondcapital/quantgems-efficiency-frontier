@@ -49,8 +49,12 @@ export function searchSymbols(q) {
 }
 
 export function computeFrontier(payload) {
+  const symbols = (payload.symbols || []).map((symbol) => {
+    const normalized = String(symbol).trim().toUpperCase()
+    return /^\d{4,6}$/.test(normalized) ? `${normalized}.TW` : normalized
+  })
   return request('/api/portfolios/frontier', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, symbols }),
   })
 }
