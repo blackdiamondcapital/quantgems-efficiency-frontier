@@ -31,6 +31,12 @@ const error = ref('')
 const result = ref(null)
 const selectedKey = ref('tangency')
 const selectedIndex = ref(-1)
+const hoveredPoint = ref(null)
+
+const activePresetKey = computed(() => Object.entries(PRESETS).find(([, item]) => (
+  item.symbols.length === symbols.value.length
+  && item.symbols.every((symbol) => symbols.value.includes(symbol))
+))?.[0] || '')
 
 const selected = computed(() => {
   if (!result.value) return null
@@ -49,7 +55,26 @@ const weightRows = computed(() => {
       name: result.value?.assets.find((a) => a.symbol === symbol)?.name || symbol,
       weight,
     }))
+    .filter((row) => Math.abs(row.weight) >= 0.0005)
     .sort((a, b) => b.weight - a.weight)
+})
+
+const comparisonRows = computed(() => {
+  if (!result.value) return []
+  return [
+    { key: 'tangency', label: '最大夏普', ...result.value.tangency },
+    { key: 'gmv', label: '最小變異數', ...result.value.gmv },
+  ]
+})
+
+const portfolioSummary = computed(() => {
+  const rows = weightRows.value.filter((row) => row.weight > 0.0005)
+  if (!rows.length) return null
+  const topWeight = rows[0].weight
+  const top3Weight = rows.slice(0, 3).reduce((sum, row) => sum + row.weight, 0)
+  const effectiveHoldings = 1 / rows.reduce((sum, row) => sum + row.weight ** 2, 0)
+  const level = top3Weight >= 0.8 ? '集中' : top3Weight >= 0.6 ? '中度集中' : '分散'
+  return { holdings: rows.length, topWeight, top3Weight, effectiveHoldings, level }
 })
 
 const chart = computed(() => {
@@ -75,7 +100,15 @@ const chart = computed(() => {
   const y = (ret) => y0 + h - ((ret - (minRet - padY)) / ((maxRet + padY) - (minRet - padY))) * h
   const path = data.frontier.map((p, i) => `${i ? 'L' : 'M'}${x(p.vol).toFixed(1)},${y(p.ret).toFixed(1)}`).join(' ')
   const cal = `M${x(0).toFixed(1)},${y(data.rf).toFixed(1)} L${x(data.tangency.vol).toFixed(1)},${y(data.tangency.ret).toFixed(1)}`
-  return { x, y, path, cal, maxVol, minRet, maxRet }
+  const xTicks = Array.from({ length: 5 }, (_, i) => {
+    const value = (maxVol * i) / 4
+    return { value, pos: x(value) }
+  })
+  const yTicks = Array.from({ length: 5 }, (_, i) => {
+    const value = minRet + ((maxRet - minRet) * i) / 4
+    return { value, pos: y(value) }
+  })
+  return { x, y, path, cal, maxVol, minRet, maxRet, xTicks, yTicks }
 })
 
 function pct(v, digits = 1) {
@@ -166,16 +199,25 @@ onMounted(() => {
 <template>
   <section class="workbench">
     <div class="hero">
-      <p class="kicker">Markowitz · Mean–Variance</p>
-      <h2>用歷史報酬與共變異數，畫出台股的效率前緣。</h2>
-      <p class="lead">
-        給定標的集合，估計年化期望報酬 μ 與共變異數 Σ，求解最小風險組合、最大夏普切線組合，以及風險–報酬前緣。僅供研究，不代表未來績效。
-      </p>
+      <div>
+        <p class="kicker">Portfolio Intelligence · Markowitz</p>
+        <h2>找到報酬與風險之間，<span>更有效率的配置。</span></h2>
+        <p class="lead">
+          以歷史報酬與共變異數估計投資組合，互動比較最大夏普、最小變異數與效率前緣上的每一個解。
+        </p>
+      </div>
+      <div class="hero-badges" aria-label="模型特點">
+        <span>台股資料</span><span>年化估計</span><span>即時計算</span>
+      </div>
     </div>
 
     <form class="panel controls" @submit.prevent="run">
+      <div class="control-head">
+        <div><span class="step">01</span><b>建立投資範圍</b></div>
+        <span>{{ symbols.length }} / 16 檔</span>
+      </div>
       <div class="presets">
-        <button v-for="(item, key) in PRESETS" :key="key" type="button" class="chip" @click="applyPreset(key)">
+        <button v-for="(item, key) in PRESETS" :key="key" type="button" class="chip" :class="{ active: activePresetKey === key }" @click="applyPreset(key)">
           {{ item.label }}
         </button>
       </div>
@@ -191,6 +233,9 @@ onMounted(() => {
             </li>
           </ul>
         </div>
+      </div>
+      <div class="control-head model-head">
+        <div><span class="step">02</span><b>設定模型參數</b></div>
       </div>
       <div class="opts">
         <label>
@@ -219,14 +264,43 @@ onMounted(() => {
       <p v-if="error" class="err">{{ error }}</p>
     </form>
 
+    <section v-if="result" class="overview" aria-label="模型結果摘要">
+      <div class="overview-head">
+        <div><span class="step">03</span><b>比較最佳化結果</b></div>
+        <span v-if="result.startDate">{{ result.startDate }} — {{ result.endDate }} · {{ result.observations }} 個共同交易日</span>
+      </div>
+      <div class="comparison-grid">
+        <button v-for="row in comparisonRows" :key="row.key" type="button" class="comparison-card" :class="{ active: selectedKey === row.key }" @click="selectedKey = row.key">
+          <span class="comparison-label">{{ row.label }}</span>
+          <strong>{{ pct(row.ret) }}</strong>
+          <span>年化報酬</span>
+          <dl><div><dt>波動</dt><dd>{{ pct(row.vol) }}</dd></div><div><dt>夏普</dt><dd>{{ sharpe(row.sharpe) }}</dd></div></dl>
+        </button>
+        <div v-if="portfolioSummary" class="insight-card">
+          <span class="comparison-label">目前組合觀察</span>
+          <strong>{{ portfolioSummary.level }}</strong>
+          <p>前 3 大持股占 {{ pct(portfolioSummary.top3Weight) }}，有效持股約 {{ portfolioSummary.effectiveHoldings.toFixed(1) }} 檔。</p>
+        </div>
+      </div>
+    </section>
+
     <div v-if="result && chart" class="stage">
       <figure class="chart-card">
+        <div class="card-head"><div><span>RISK / RETURN MAP</span><h3>效率前緣</h3></div><span>點擊前緣選擇配置</span></div>
         <svg viewBox="0 0 640 360" role="img" aria-label="效率前緣圖：橫軸風險、縱軸期望報酬">
           <text x="320" y="18" text-anchor="middle" class="chart-title">效率前緣（年化）</text>
+          <g v-for="tick in chart.xTicks" :key="`x-${tick.value}`">
+            <line :x1="tick.pos" y1="28" :x2="tick.pos" y2="320" class="grid-line" />
+            <text :x="tick.pos" y="337" text-anchor="middle" class="tick-label">{{ pct(tick.value, 0) }}</text>
+          </g>
+          <g v-for="tick in chart.yTicks" :key="`y-${tick.value}`">
+            <line x1="56" :y1="tick.pos" x2="616" :y2="tick.pos" class="grid-line" />
+            <text x="49" :y="tick.pos + 4" text-anchor="end" class="tick-label">{{ pct(tick.value, 0) }}</text>
+          </g>
           <line x1="56" y1="320" x2="616" y2="320" class="axis" />
           <line x1="56" y1="28" x2="56" y2="320" class="axis" />
-          <text x="336" y="350" text-anchor="middle" class="axis-label">風險 σ</text>
-          <text x="18" y="180" transform="rotate(-90 18 180)" class="axis-label">期望報酬 μ</text>
+          <text x="336" y="354" text-anchor="middle" class="axis-label">年化波動 σ</text>
+          <text x="12" y="180" transform="rotate(-90 12 180)" text-anchor="middle" class="axis-label">年化期望報酬 μ</text>
           <path :d="chart.cal" class="cal" />
           <path :d="chart.path" class="frontier" />
           <circle
@@ -234,8 +308,13 @@ onMounted(() => {
             :key="'a'+i"
             :cx="chart.x(a.vol)"
             :cy="chart.y(a.ret)"
-            r="4.2"
+            r="5"
             class="asset"
+            tabindex="0"
+            @mouseenter="hoveredPoint = { x: chart.x(a.vol), y: chart.y(a.ret), label: `${a.symbol} ${a.name}`, ret: a.ret, vol: a.vol }"
+            @mouseleave="hoveredPoint = null"
+            @focus="hoveredPoint = { x: chart.x(a.vol), y: chart.y(a.ret), label: `${a.symbol} ${a.name}`, ret: a.ret, vol: a.vol }"
+            @blur="hoveredPoint = null"
           >
             <title>{{ a.symbol }} {{ a.name }}</title>
           </circle>
@@ -248,9 +327,16 @@ onMounted(() => {
             class="fdot"
             :class="{ active: selectedKey === 'point' && selectedIndex === i }"
             @click="pickFrontier(i)"
+            @mouseenter="hoveredPoint = { x: chart.x(p.vol), y: chart.y(p.ret), label: `前緣組合 ${i + 1}`, ret: p.ret, vol: p.vol }"
+            @mouseleave="hoveredPoint = null"
           />
-          <circle :cx="chart.x(result.gmv.vol)" :cy="chart.y(result.gmv.ret)" r="7" class="gmv" @click="selectedKey = 'gmv'" />
-          <circle :cx="chart.x(result.tangency.vol)" :cy="chart.y(result.tangency.ret)" r="7" class="tan" @click="selectedKey = 'tangency'" />
+          <circle :cx="chart.x(result.gmv.vol)" :cy="chart.y(result.gmv.ret)" r="8" class="gmv" @click="selectedKey = 'gmv'" @mouseenter="hoveredPoint = { x: chart.x(result.gmv.vol), y: chart.y(result.gmv.ret), label: '全球最小變異數', ret: result.gmv.ret, vol: result.gmv.vol }" @mouseleave="hoveredPoint = null" />
+          <circle :cx="chart.x(result.tangency.vol)" :cy="chart.y(result.tangency.ret)" r="8" class="tan" @click="selectedKey = 'tangency'" @mouseenter="hoveredPoint = { x: chart.x(result.tangency.vol), y: chart.y(result.tangency.ret), label: '最大夏普組合', ret: result.tangency.ret, vol: result.tangency.vol }" @mouseleave="hoveredPoint = null" />
+          <g v-if="hoveredPoint" class="chart-tooltip" pointer-events="none">
+            <rect :x="Math.min(hoveredPoint.x + 10, 430)" :y="Math.max(hoveredPoint.y - 58, 30)" width="190" height="52" rx="8" />
+            <text :x="Math.min(hoveredPoint.x + 20, 440)" :y="Math.max(hoveredPoint.y - 36, 52)" class="tooltip-title">{{ hoveredPoint.label }}</text>
+            <text :x="Math.min(hoveredPoint.x + 20, 440)" :y="Math.max(hoveredPoint.y - 17, 71)" class="tooltip-value">報酬 {{ pct(hoveredPoint.ret) }} · 波動 {{ pct(hoveredPoint.vol) }}</text>
+          </g>
         </svg>
         <figcaption>
           灰點＝個股；金線＝效率前緣；青點＝最小變異數；琥珀點＝最大夏普。虛線為資本配置線（CAL）。
@@ -311,11 +397,31 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.workbench { display: grid; gap: 18px; }
+.workbench { display: grid; gap: 22px; }
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 24px;
+  padding: 18px 4px 10px;
+}
 .hero h2 {
-  margin: 0 0 8px;
-  font-size: clamp(1.4rem, 4vw, 2.05rem);
-  line-height: 1.25;
+  margin: 0 0 10px;
+  max-width: 52rem;
+  font-size: clamp(1.7rem, 4.5vw, 3.25rem);
+  line-height: 1.13;
+  letter-spacing: -0.035em;
+}
+.hero h2 span { color: #fde68a; }
+.hero-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.hero-badges span {
+  padding: 7px 10px;
+  border: 1px solid rgba(103,232,249,.2);
+  border-radius: 999px;
+  background: rgba(8,18,28,.5);
+  color: #a5f3fc;
+  font-size: .72rem;
+  white-space: nowrap;
 }
 .kicker {
   margin: 0 0 8px;
@@ -324,14 +430,27 @@ onMounted(() => {
   font-size: 0.74rem;
   font-weight: 800;
 }
-.lead { margin: 0; color: #94a3b8; max-width: 44rem; }
+.lead { margin: 0; color: #94a3b8; max-width: 46rem; font-size: clamp(.9rem, 2vw, 1.05rem); line-height: 1.75; }
 
-.panel {
-  padding: 14px;
-  border-radius: 16px;
+.panel, .overview {
+  padding: 18px;
+  border-radius: 20px;
   border: 1px solid rgba(148,163,184,.16);
-  background: rgba(8,18,28,.55);
+  background: linear-gradient(145deg, rgba(13,27,41,.82), rgba(7,17,27,.7));
+  box-shadow: 0 18px 45px rgba(0,0,0,.14);
 }
+.control-head, .overview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: #94a3b8;
+  font-size: .78rem;
+}
+.control-head > div, .overview-head > div { display: flex; align-items: center; gap: 9px; color: #e2e8f0; font-size: .92rem; }
+.step { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: rgba(34,211,238,.12); color: #67e8f9; font-size: .7rem; font-weight: 900; }
+.model-head { margin-top: 18px; padding-top: 16px; border-top: 1px solid rgba(148,163,184,.12); }
 .presets, .universe, .opts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .universe { margin: 10px 0; }
 .chip, .tag, .btn, .tabs button, .sym {
@@ -342,15 +461,20 @@ onMounted(() => {
   color: inherit;
   cursor: pointer;
 }
-.chip, .tag { padding: 0 12px; }
+.chip, .tag { padding: 0 12px; transition: border-color .2s ease, background .2s ease, transform .2s ease; }
+.chip:hover, .tag:hover { transform: translateY(-1px); border-color: rgba(103,232,249,.55); }
+.chip.active { background: rgba(34,211,238,.13); border-color: rgba(34,211,238,.55); color: #cffafe; }
 .tag { background: rgba(253, 230, 138, 0.08); border-color: rgba(253,230,138,.28); }
 .btn {
-  padding: 0 16px;
-  font-weight: 800;
-  background: #f8fafc;
-  color: #0b1220;
+  padding: 0 18px;
+  min-height: 44px;
+  font-weight: 900;
+  background: linear-gradient(135deg, #f8fafc, #a5f3fc);
+  color: #07111c;
   border-color: transparent;
+  box-shadow: 0 8px 24px rgba(34,211,238,.13);
 }
+.btn:disabled { opacity: .55; cursor: wait; }
 .opts label { display: grid; gap: 4px; color: #94a3b8; font-size: 0.78rem; }
 .opts select, .opts input[type="number"] {
   min-height: 40px;
@@ -379,27 +503,62 @@ onMounted(() => {
   border-radius: 12px; background: #0b1724; border: 1px solid rgba(148,163,184,.2);
 }
 .suggest button { width: 100%; text-align: left; border: 0; background: none; color: inherit; min-height: 40px; cursor: pointer; }
-.err { margin: 8px 0 0; color: #fde68a; }
+.err { margin: 12px 0 0; padding: 10px 12px; border: 1px solid rgba(251,191,36,.25); border-radius: 10px; background: rgba(120,53,15,.18); color: #fde68a; }
 
-.stage { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(240px, 0.7fr); gap: 14px; }
-.chart-card, .result-card {
-  border-radius: 16px;
-  border: 1px solid rgba(148,163,184,.14);
-  background: rgba(8,18,28,.6);
-  padding: 10px 12px 12px;
+.overview-head { margin-bottom: 14px; }
+.comparison-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(210px, .85fr); gap: 10px; }
+.comparison-card, .insight-card {
+  min-width: 0;
+  padding: 15px;
+  border: 1px solid rgba(148,163,184,.16);
+  border-radius: 15px;
+  background: rgba(5,15,24,.55);
+  color: #e2e8f0;
+  text-align: left;
 }
-svg { width: 100%; height: auto; display: block; }
-.chart-title { fill: #e2e8f0; font-size: 13px; font-weight: 700; }
-.axis { stroke: rgba(148,163,184,.35); }
-.axis-label { fill: #94a3b8; font-size: 11px; }
-.frontier { fill: none; stroke: #fde68a; stroke-width: 2.2; }
+.comparison-card { cursor: pointer; transition: border-color .2s ease, transform .2s ease, background .2s ease; }
+.comparison-card:hover { transform: translateY(-2px); border-color: rgba(103,232,249,.38); }
+.comparison-card.active { border-color: rgba(253,230,138,.52); background: linear-gradient(145deg, rgba(253,230,138,.09), rgba(5,15,24,.7)); }
+.comparison-label { display: block; color: #94a3b8; font-size: .75rem; font-weight: 700; }
+.comparison-card > strong, .insight-card > strong { display: block; margin-top: 8px; color: #f8fafc; font-size: clamp(1.5rem, 3vw, 2rem); }
+.comparison-card > span:nth-child(3) { color: #94a3b8; font-size: .72rem; }
+.comparison-card dl { display: flex; gap: 22px; margin: 14px 0 0; }
+.comparison-card dl div { display: flex; gap: 6px; }
+.comparison-card dt { color: #64748b; }
+.comparison-card dd { margin: 0; font-weight: 800; }
+.insight-card { background: linear-gradient(145deg, rgba(8,47,73,.35), rgba(5,15,24,.65)); }
+.insight-card > strong { color: #67e8f9; }
+.insight-card p { margin: 8px 0 0; color: #94a3b8; font-size: .8rem; line-height: 1.6; }
+
+.stage { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.7fr); gap: 14px; }
+.chart-card, .result-card {
+  margin: 0;
+  border-radius: 20px;
+  border: 1px solid rgba(148,163,184,.14);
+  background: linear-gradient(155deg, rgba(11,25,38,.82), rgba(5,14,23,.7));
+  padding: 15px 16px 16px;
+}
+.card-head { display: flex; justify-content: space-between; align-items: end; gap: 12px; padding: 2px 4px 8px; }
+.card-head span { color: #64748b; font-size: .67rem; letter-spacing: .1em; }
+.card-head h3 { margin: 2px 0 0; font-size: 1.1rem; }
+svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chart-title { fill: transparent; font-size: 1px; }
+.grid-line { stroke: rgba(148,163,184,.09); stroke-width: 1; }
+.tick-label { fill: #64748b; font-size: 9px; }
+.axis { stroke: rgba(148,163,184,.3); }
+.axis-label { fill: #94a3b8; font-size: 10px; }
+.frontier { fill: none; stroke: #fde68a; stroke-width: 2.5; filter: drop-shadow(0 0 5px rgba(253,230,138,.18)); }
 .cal { fill: none; stroke: #67e8f9; stroke-width: 1.4; stroke-dasharray: 5 5; }
-.asset { fill: #64748b; }
-.fdot { fill: rgba(253,230,138,.35); cursor: pointer; }
-.fdot.active { fill: #f8fafc; }
-.gmv { fill: #22d3ee; cursor: pointer; }
-.tan { fill: #f59e0b; cursor: pointer; }
-figcaption { color: #94a3b8; font-size: 0.78rem; margin-top: 8px; }
+.asset { fill: #64748b; cursor: help; transition: r .15s ease, fill .15s ease; }
+.asset:hover, .asset:focus { fill: #cbd5e1; outline: none; }
+.fdot { fill: rgba(253,230,138,.38); cursor: pointer; transition: r .15s ease, fill .15s ease; }
+.fdot:hover, .fdot.active { fill: #f8fafc; }
+.gmv { fill: #22d3ee; stroke: #083344; stroke-width: 2; cursor: pointer; }
+.tan { fill: #f59e0b; stroke: #451a03; stroke-width: 2; cursor: pointer; }
+.chart-tooltip rect { fill: rgba(3,11,18,.96); stroke: rgba(103,232,249,.35); }
+.tooltip-title { fill: #f8fafc; font-size: 10px; font-weight: 800; }
+.tooltip-value { fill: #94a3b8; font-size: 9px; }
+figcaption { color: #94a3b8; font-size: 0.76rem; line-height: 1.55; margin-top: 8px; padding: 0 4px; }
 
 .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
 .tabs button { padding: 0 12px; }
@@ -425,8 +584,23 @@ th { color: #94a3b8; font-size: 0.78rem; }
 
 @media (max-width: 1023px) {
   .stage { grid-template-columns: 1fr; }
+  .comparison-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .insight-card { grid-column: 1 / -1; }
 }
 @media (max-width: 767px) {
+  .workbench { gap: 14px; }
+  .hero { grid-template-columns: 1fr; padding-top: 6px; }
+  .hero h2 { font-size: clamp(1.8rem, 9vw, 2.6rem); }
+  .hero-badges { justify-content: flex-start; }
+  .panel, .overview { padding: 14px; border-radius: 16px; }
   .opts { flex-direction: column; align-items: stretch; }
+  .btn { width: 100%; }
+  .overview-head { align-items: flex-start; flex-direction: column; }
+  .comparison-grid { grid-template-columns: 1fr; }
+  .insight-card { grid-column: auto; }
+  .comparison-card > strong, .insight-card > strong { font-size: 1.65rem; }
+  .chart-card, .result-card { padding: 12px; border-radius: 16px; }
+  .card-head > span { display: none; }
+  .weights li { grid-template-columns: 5.5rem 1fr 3.2rem; }
 }
 </style>
