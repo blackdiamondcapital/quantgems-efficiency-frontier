@@ -19,11 +19,13 @@ const PRESETS = {
 }
 
 const STORAGE_KEY = 'qg_frontier_universe'
+const CAPITAL_STORAGE_KEY = 'qg_frontier_capital'
 
 const symbols = ref([...PRESETS.mega.symbols])
 const lookback = ref(504)
 const rfPct = ref(1.5)
 const longOnly = ref(true)
+const investmentCapital = ref(1000000)
 const query = ref('')
 const suggestions = ref([])
 const loading = ref(false)
@@ -54,6 +56,7 @@ const weightRows = computed(() => {
       symbol,
       name: result.value?.assets.find((a) => a.symbol === symbol)?.name || symbol,
       weight,
+      amount: weight * Math.max(0, Number(investmentCapital.value) || 0),
     }))
     .filter((row) => Math.abs(row.weight) >= 0.0005)
     .sort((a, b) => b.weight - a.weight)
@@ -125,6 +128,15 @@ function displaySymbol(symbol) {
   return String(symbol || '').replace(/\.(TW|TWO)$/i, '')
 }
 
+function currency(value) {
+  if (!Number.isFinite(Number(value))) return '—'
+  return new Intl.NumberFormat('zh-TW', {
+    style: 'currency',
+    currency: 'TWD',
+    maximumFractionDigits: 0,
+  }).format(Number(value))
+}
+
 function openChart(symbol) {
   window.open(`${MAIN_SITE_URL}/?symbol=${encodeURIComponent(symbol)}`, '_blank', 'noopener,noreferrer')
 }
@@ -165,6 +177,10 @@ watch(query, () => {
   searchTimer = window.setTimeout(onSearch, 180)
 })
 
+watch(investmentCapital, (value) => {
+  try { localStorage.setItem(CAPITAL_STORAGE_KEY, String(Math.max(0, Number(value) || 0))) } catch {}
+})
+
 async function run() {
   loading.value = true
   error.value = ''
@@ -195,6 +211,8 @@ onMounted(() => {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')
     if (Array.isArray(saved) && saved.length >= 2) symbols.value = saved.map(String)
+    const savedCapital = Number(localStorage.getItem(CAPITAL_STORAGE_KEY))
+    if (Number.isFinite(savedCapital) && savedCapital > 0) investmentCapital.value = savedCapital
   } catch {}
   run()
 })
@@ -255,6 +273,13 @@ onMounted(() => {
           <span class="rf">
             <input v-model.number="rfPct" type="number" min="0" max="10" step="0.1" />
             <em>%</em>
+          </span>
+        </label>
+        <label class="capital-field">
+          投資資金
+          <span class="money-input">
+            <em>NT$</em>
+            <input v-model.number="investmentCapital" type="number" min="1000" step="10000" inputmode="numeric" />
           </span>
         </label>
         <label class="check">
@@ -359,14 +384,21 @@ onMounted(() => {
           <div><dt>波動</dt><dd>{{ pct(selected?.vol) }}</dd></div>
           <div><dt>夏普</dt><dd>{{ sharpe(selected?.sharpe) }}</dd></div>
         </dl>
+        <div class="allocation-head">
+          <span>資金配置</span>
+          <strong>{{ currency(investmentCapital) }}</strong>
+        </div>
         <ul class="weights">
           <li v-for="row in weightRows" :key="row.symbol">
             <button type="button" class="sym" @click="openChart(row.symbol)">
               <b>{{ displaySymbol(row.symbol) }}</b>
               <small>{{ row.name }}</small>
             </button>
-            <i :style="{ width: `${Math.max(2, row.weight * 100)}%` }" />
-            <span>{{ (row.weight * 100).toFixed(1) }}%</span>
+            <i :style="{ width: `${Math.max(2, Math.abs(row.weight) * 100)}%` }" />
+            <span class="allocation-value">
+              <b>{{ (row.weight * 100).toFixed(1) }}%</b>
+              <small>{{ currency(row.amount) }}</small>
+            </span>
           </li>
         </ul>
       </aside>
@@ -491,6 +523,18 @@ onMounted(() => {
 }
 .rf { display: flex; align-items: center; gap: 6px; }
 .rf em { font-style: normal; color: #cbd5e1; }
+.capital-field { min-width: 180px; }
+.money-input {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  border: 1px solid rgba(148,163,184,.24);
+  border-radius: 10px;
+  background: #0b1724;
+  overflow: hidden;
+}
+.money-input em { padding-left: 10px; color: #67e8f9; font-size: .72rem; font-style: normal; font-weight: 800; }
+.money-input input[type="number"] { width: 125px; min-width: 0; border: 0; background: transparent; }
 .check { display: flex !important; align-items: center; gap: 8px; min-height: 40px; }
 .search-box { position: relative; flex: 1 1 180px; }
 .search-box input {
@@ -572,9 +616,23 @@ figcaption { color: #94a3b8; font-size: 0.76rem; line-height: 1.55; margin-top: 
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0 0 12px; }
 .stats dt { color: #94a3b8; font-size: 0.74rem; }
 .stats dd { margin: 4px 0 0; font-weight: 800; }
-.weights { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.weights li { display: grid; grid-template-columns: 5.2rem 1fr 3.2rem; gap: 8px; align-items: center; }
+.allocation-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 14px 0 12px;
+  padding-top: 13px;
+  border-top: 1px solid rgba(148,163,184,.12);
+}
+.allocation-head span { color: #94a3b8; font-size: .76rem; }
+.allocation-head strong { color: #67e8f9; font-size: .92rem; }
+.weights { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.weights li { display: grid; grid-template-columns: 5.2rem minmax(30px, 1fr) 6.8rem; gap: 8px; align-items: center; }
 .weights i { display: block; height: 7px; border-radius: 99px; background: linear-gradient(90deg, #38bdf8, #fde68a); }
+.allocation-value { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.25; }
+.allocation-value b { color: #e2e8f0; font-size: .9rem; }
+.allocation-value small { color: #67e8f9; font-size: .68rem; white-space: nowrap; }
 .sym {
   display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
   border: 0; background: none; padding: 0; min-height: 0;
@@ -599,6 +657,8 @@ th { color: #94a3b8; font-size: 0.78rem; }
   .hero-badges { justify-content: flex-start; }
   .panel, .overview { padding: 14px; border-radius: 16px; }
   .opts { flex-direction: column; align-items: stretch; }
+  .capital-field, .money-input { width: 100%; }
+  .money-input input[type="number"] { width: 100%; }
   .btn { width: 100%; }
   .overview-head { align-items: flex-start; flex-direction: column; }
   .comparison-grid { grid-template-columns: 1fr; }
@@ -606,6 +666,6 @@ th { color: #94a3b8; font-size: 0.78rem; }
   .comparison-card > strong, .insight-card > strong { font-size: 1.65rem; }
   .chart-card, .result-card { padding: 12px; border-radius: 16px; }
   .card-head > span { display: none; }
-  .weights li { grid-template-columns: 5.5rem 1fr 3.2rem; }
+  .weights li { grid-template-columns: 5.5rem minmax(30px, 1fr) 6.6rem; }
 }
 </style>
