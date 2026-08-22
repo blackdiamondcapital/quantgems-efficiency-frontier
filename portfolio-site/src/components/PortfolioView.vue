@@ -299,8 +299,8 @@ onMounted(() => {
           </g>
           <line x1="56" y1="320" x2="616" y2="320" class="axis" />
           <line x1="56" y1="28" x2="56" y2="320" class="axis" />
-          <text x="336" y="354" text-anchor="middle" class="axis-label">年化波動 σ</text>
-          <text x="12" y="180" transform="rotate(-90 12 180)" text-anchor="middle" class="axis-label">年化期望報酬 μ</text>
+          <text x="336" y="354" text-anchor="middle" class="axis-label">年化標準差</text>
+          <text x="12" y="180" transform="rotate(-90 12 180)" text-anchor="middle" class="axis-label">年化平均報酬</text>
           <path :d="chart.cal" class="cal" />
           <path :d="chart.path" class="frontier" />
           <circle
@@ -373,8 +373,8 @@ onMounted(() => {
         <thead>
           <tr>
             <th>標的</th>
-            <th>μ</th>
-            <th>σ</th>
+            <th>平均數</th>
+            <th>標準差</th>
             <th>夏普</th>
           </tr>
         </thead>
