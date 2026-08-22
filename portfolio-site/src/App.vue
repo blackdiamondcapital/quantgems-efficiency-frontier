@@ -27,7 +27,7 @@ onMounted(() => {
         </div>
         <h1 class="brand-title">
           <span class="brand-title-name">QuantGems®</span>
-          <span>效率前緣</span>
+          <span>投資組合</span>
         </h1>
       </div>
       <AuthBar />
