@@ -205,7 +205,7 @@ onMounted(() => {
     <div class="hero">
       <div>
         <p class="kicker">Portfolio Intelligence · Markowitz</p>
-        <h2>找到報酬與風險之間，<span>更有效率的配置。</span></h2>
+        <h2>從風險與報酬出發，<span>找到適合你的投資組合。</span></h2>
         <p class="lead">
           以歷史報酬與共變異數估計投資組合，互動比較最大夏普、最小變異數與效率前緣上的每一個解。
         </p>
