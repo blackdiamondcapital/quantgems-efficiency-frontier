@@ -121,6 +121,10 @@ function sharpe(v) {
   return Number(v).toFixed(2)
 }
 
+function displaySymbol(symbol) {
+  return String(symbol || '').replace(/\.(TW|TWO)$/i, '')
+}
+
 function openChart(symbol) {
   window.open(`${MAIN_SITE_URL}/?symbol=${encodeURIComponent(symbol)}`, '_blank', 'noopener,noreferrer')
 }
@@ -223,13 +227,13 @@ onMounted(() => {
       </div>
       <div class="universe">
         <button v-for="sym in symbols" :key="sym" type="button" class="tag" @click="removeSymbol(sym)">
-          {{ sym }} <span aria-hidden="true">×</span>
+          {{ displaySymbol(sym) }} <span aria-hidden="true">×</span>
         </button>
         <div class="search-box">
           <input v-model="query" placeholder="加入代號或名稱" autocomplete="off" />
           <ul v-if="suggestions.length" class="suggest">
             <li v-for="item in suggestions" :key="item.symbol">
-              <button type="button" @click="addSymbol(item)">{{ item.symbol }}　{{ item.name }}</button>
+              <button type="button" @click="addSymbol(item)">{{ displaySymbol(item.symbol) }}　{{ item.name }}</button>
             </li>
           </ul>
         </div>
@@ -311,12 +315,12 @@ onMounted(() => {
             r="5"
             class="asset"
             tabindex="0"
-            @mouseenter="hoveredPoint = { x: chart.x(a.vol), y: chart.y(a.ret), label: `${a.symbol} ${a.name}`, ret: a.ret, vol: a.vol }"
+            @mouseenter="hoveredPoint = { x: chart.x(a.vol), y: chart.y(a.ret), label: `${displaySymbol(a.symbol)} ${a.name}`, ret: a.ret, vol: a.vol }"
             @mouseleave="hoveredPoint = null"
-            @focus="hoveredPoint = { x: chart.x(a.vol), y: chart.y(a.ret), label: `${a.symbol} ${a.name}`, ret: a.ret, vol: a.vol }"
+            @focus="hoveredPoint = { x: chart.x(a.vol), y: chart.y(a.ret), label: `${displaySymbol(a.symbol)} ${a.name}`, ret: a.ret, vol: a.vol }"
             @blur="hoveredPoint = null"
           >
-            <title>{{ a.symbol }} {{ a.name }}</title>
+            <title>{{ displaySymbol(a.symbol) }} {{ a.name }}</title>
           </circle>
           <circle
             v-for="(p, i) in result.frontier"
@@ -358,7 +362,7 @@ onMounted(() => {
         <ul class="weights">
           <li v-for="row in weightRows" :key="row.symbol">
             <button type="button" class="sym" @click="openChart(row.symbol)">
-              <b>{{ row.symbol }}</b>
+              <b>{{ displaySymbol(row.symbol) }}</b>
               <small>{{ row.name }}</small>
             </button>
             <i :style="{ width: `${Math.max(2, row.weight * 100)}%` }" />
@@ -382,7 +386,7 @@ onMounted(() => {
           <tr v-for="a in result.assets" :key="a.symbol">
             <td>
               <button type="button" class="sym" @click="openChart(a.symbol)">
-                <b>{{ a.symbol }}</b>
+                <b>{{ displaySymbol(a.symbol) }}</b>
                 <small>{{ a.name }}</small>
               </button>
             </td>
